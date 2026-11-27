@@ -79,12 +79,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 `scripts/ci.sh` runs the same checks as the GitHub workflow on your own machine:
 lints for native, Windows and web, then the tests, then release builds for all three.
-Use `--quick` to skip the release builds, or `--package` to also build the installers.
+Use `--quick` to skip the release builds, or `--package` to also build the installers
+(this OS's, plus the Windows NSIS installer).
 
-Windows is cross-compiled from macOS or Linux with MinGW. One-time setup on macOS:
+Windows is cross-compiled from macOS or Linux with MinGW, and its installer is built with
+NSIS. One-time setup on macOS:
 
 ```bash
-brew install mingw-w64 trunk
+brew install mingw-w64 makensis trunk
 rustup target add x86_64-pc-windows-gnu wasm32-unknown-unknown
 ```
 

@@ -6,7 +6,7 @@
 #   scripts/ci.sh --package  everything, plus installers (packaging/package.sh)
 #
 # Windows is cross-compiled with MinGW (x86_64-pc-windows-gnu). One-time setup on macOS:
-#   brew install mingw-w64 && rustup target add x86_64-pc-windows-gnu
+#   brew install mingw-w64 makensis && rustup target add x86_64-pc-windows-gnu
 # Web needs: rustup target add wasm32-unknown-unknown && brew install trunk
 set -euo pipefail
 
@@ -75,7 +75,12 @@ if [[ $QUICK == 0 ]]; then
 fi
 
 if [[ $PACKAGE == 1 ]]; then
-  step "Installers" packaging/package.sh
+  step "Installers (this OS)" packaging/package.sh
+  if has_windows && command -v makensis >/dev/null; then
+    step "Installer (Windows)" packaging/package.sh --target "$WIN"
+  else
+    skip "Installer (Windows)" "needs mingw-w64, the $WIN target and makensis"
+  fi
 fi
 
 summary

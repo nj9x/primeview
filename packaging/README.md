@@ -94,6 +94,23 @@ The MSI installs per machine. On some newer Windows images, light.exe ICE valida
 with `LGHT0217` because VBScript is missing. If you hit that, enable the VBScript optional
 feature, or build on `windows-2022`.
 
+### Windows installer from macOS or Linux
+
+The NSIS installer can also be cross-built. The MSI can't, because the WiX tools only run on Windows.
+
+```bash
+brew install mingw-w64 makensis          # Linux: apt install mingw-w64 nsis
+rustup target add x86_64-pc-windows-gnu
+cargo build --release -p primeview --target x86_64-pc-windows-gnu
+packaging/package.sh --target x86_64-pc-windows-gnu   # -> target/packager/primeview_<ver>_x64-setup.exe
+```
+
+This build uses the GNU toolchain rather than MSVC. It only depends on DLLs that ship
+with Windows 10 and 11. `package.sh` sets `LC_ALL=en_US.UTF-8` for this step, because
+`makensis` crashes with `std::bad_alloc` under the C locale. Code signing is skipped when
+cross-building. Sign on Windows, or set `[windows] sign-command` (for example to
+`osslsigncode`).
+
 ### Linux (Debian/Ubuntu)
 
 ```bash

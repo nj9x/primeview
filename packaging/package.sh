@@ -47,6 +47,17 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) os=windows; default_formats="nsis,wix" ;;
   *) echo "package.sh: unsupported OS $(uname -s)" >&2; exit 1 ;;
 esac
+# Cross-packaging for Windows from macOS/Linux: NSIS only (needs `makensis`;
+# the WiX/MSI tools run only on Windows).
+if [[ "$target" == *windows* && $os != windows ]]; then
+  os=windows
+  default_formats="nsis"
+  command -v makensis >/dev/null || {
+    echo "package.sh: makensis not found (brew install makensis / apt install nsis)" >&2; exit 1; }
+  # makensis aborts with std::bad_alloc under the C/POSIX locale (e.g. when
+  # LANG is unset); any UTF-8 locale works.
+  export LC_ALL=en_US.UTF-8
+fi
 formats="${formats:-$default_formats}"
 
 # Absolute path, and in the native form cargo-packager (a Windows exe on Windows) understands.
