@@ -1,0 +1,94 @@
+# cargo-packager configuration for the PrimeView desktop app.
+#
+# Use the wrapper rather than calling cargo-packager directly:
+#
+#     cargo build --release -p primeview
+#     packaging/package.sh                 # formats for the current OS
+#
+# The wrapper fills in the version from Cargo, points `binaries-dir` at the
+# right target directory, and injects signing settings when the signing env
+# vars are set (see packaging/README.md). It still works without the wrapper:
+#     cargo packager -c packaging/Packager.toml -f app,dmg
+#
+# All relative paths are resolved from this directory (packaging/).
+
+name = "primeview"
+product-name = "PrimeView"
+# Kept in sync with the workspace version: package.sh overrides this with
+# `cargo pkgid -p primeview`, and the release workflow checks it against the tag.
+version = "0.1.0"
+identifier = "com.primeview.app"
+publisher = "PrimeView"
+authors = ["PrimeView"]
+copyright = "Copyright © 2026 PrimeView. Licensed under MIT OR Apache-2.0."
+category = "Finance"
+description = "Fast native charting and market analysis"
+long-description = """
+PrimeView is a fast, native charting and market-analysis platform: \
+candlestick and bar charts, indicators, drawing tools and live market data."""
+# Shown as the license page of the NSIS and MSI installers. package.sh drops
+# it for macOS, where it would become a click-through EULA on the DMG.
+license-file = "LICENSE.txt"
+
+# Where the compiled `primeview` binary lives, and where packages go.
+binaries-dir = "../target/release"
+out-dir = "../target/packager"
+binaries = [{ path = "primeview", main = true }]
+
+# .icns -> macOS, .ico -> Windows, .png -> Linux (deb/AppImage).
+# Regenerate with: python3 packaging/icons/generate_icons.py
+icons = [
+  "icons/icon.icns",
+  "icons/icon.ico",
+  "icons/icon-32.png",
+  "icons/icon-64.png",
+  "icons/icon-128.png",
+  "icons/icon-256.png",
+  "icons/icon-512.png",
+]
+
+[macos]
+minimum-system-version = "11.0"
+# signing-identity is injected by package.sh from $APPLE_SIGNING_IDENTITY
+# (ad-hoc "-" when unset).
+
+[dmg]
+window-size = { width = 640, height = 400 }
+app-position = { x = 180, y = 190 }
+application-folder-position = { x = 460, y = 190 }
+
+[windows]
+digest-algorithm = "sha256"
+timestamp-url = "http://timestamp.digicert.com"
+# certificate-thumbprint is injected by package.sh from
+# $WINDOWS_CERTIFICATE_THUMBPRINT; without it nothing is signed.
+
+[nsis]
+# Per-user install (no UAC prompt). Note: the kebab-case alias is "installer-mode".
+installer-mode = "currentUser"
+installer-icon = "icons/icon.ico"
+compression = "lzma"
+
+[wix]
+languages = ["en-US"]
+
+[deb]
+# Otherwise derived from product-name as "prime-view".
+package-name = "primeview"
+section = "misc"
+priority = "optional"
+# winit/wgpu load X11/Wayland, xkbcommon and Vulkan/EGL at run time.
+depends = [
+  "libc6",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libx11-6",
+  "libx11-xcb1",
+  "libxcursor1",
+  "libxrandr2",
+  "libxi6",
+  "libwayland-client0",
+  "libvulkan1 | libegl1",
+]
+
+[appimage]

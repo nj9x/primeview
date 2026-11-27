@@ -1,0 +1,269 @@
+name: Release
+
+# Builds installers for every platform and attaches them to a *draft* GitHub
+# Release. Push a tag `vX.Y.Z` (must match the crate version), or run it by
+# hand: without a tag input it only builds and uploads workflow artifacts.
+#
+# Signing/notarization run only when the matching secrets exist; see
+# packaging/README.md. Nothing here requires a secret.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Create a draft release for this tag (e.g. v0.1.0). Leave empty to only build artifacts."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PACKAGER_VERSION: "0.11.8"
+
+jobs:
+  version:
+    name: Version check
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        name: Read crate version and compare with the tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "primeview") | .version')"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then tag="$GITHUB_REF_NAME"; else tag="$INPUT_TAG"; fi
+          if [[ -n "$tag" && "$tag" != "v$version" ]]; then
+            echo "::error::Tag '$tag' does not match the primeview crate version '$version' (expected 'v$version')."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "PrimeView $version, release tag: ${tag:-<none, artifacts only>}" >> "$GITHUB_STEP_SUMMARY"
+
+  macos:
+    name: macOS (universal .app + .dmg)
+    needs: version
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      # Empty when the secret doesn't exist; package.sh then makes an ad-hoc signed,
+      # un-notarized build.
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # cargo-packager reads the app-specific password from APPLE_PASSWORD.
+      APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-universal
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build (arm64 + x86_64)
+        run: |
+          cargo build --release --locked -p primeview --target aarch64-apple-darwin
+          cargo build --release --locked -p primeview --target x86_64-apple-darwin
+      - name: Make universal binary
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/primeview \
+            target/aarch64-apple-darwin/release/primeview \
+            target/x86_64-apple-darwin/release/primeview
+          lipo -info target/universal-apple-darwin/release/primeview
+
+      - name: Package .app + .dmg
+        # Signing is configured from APPLE_SIGNING_IDENTITY; cargo-packager imports
+        # APPLE_CERTIFICATE into a temporary keychain and notarizes + staples the .app
+        # when APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are set.
+        run: packaging/package.sh --target universal-apple-darwin -f app,dmg
+
+      - name: Notarize and staple the .dmg
+        if: env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: |
+          for dmg in target/packager/*.dmg; do
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" --wait
+            xcrun stapler staple "$dmg"
+          done
+
+      - name: Verify bundle
+        run: |
+          app=target/packager/PrimeView.app
+          plutil -p "$app/Contents/Info.plist"
+          lipo -info "$app/Contents/MacOS/primeview"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Smoke test: the app must stay up for 10 s (SIGALRM => exit 142).
+          set +e
+          perl -e 'alarm 10; exec { $ARGV[0] } @ARGV or die "exec failed: $!"' "$PWD/$app/Contents/MacOS/primeview"
+          code=$?
+          set -e
+          echo "launch exit code: $code"
+          [[ $code -eq 142 ]] || { echo "::warning::App exited with $code within 10 s on the runner"; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primeview-macos
+          path: target/packager/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows (NSIS .exe + MSI)
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build
+        run: cargo build --release --locked -p primeview --target x86_64-pc-windows-msvc
+
+      - name: Import code-signing certificate
+        if: env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Package NSIS + MSI
+        # cargo-packager downloads NSIS and the WiX v3 toolset itself. With
+        # WINDOWS_CERTIFICATE_THUMBPRINT set it signs primeview.exe, the uninstaller
+        # and both installers with signtool (sha256 + timestamp).
+        run: packaging/package.sh --target x86_64-pc-windows-msvc -f nsis,wix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primeview-windows
+          path: |
+            target/packager/*-setup.exe
+            target/packager/*.msi
+          if-no-files-found: error
+
+  linux:
+    name: Linux (.deb + AppImage)
+    needs: version
+    # The oldest supported Ubuntu image: binaries built here run on any distro
+    # with the same or a newer glibc.
+    runs-on: ubuntu-22.04
+    env:
+      # linuxdeploy is itself an AppImage; extract-and-run avoids needing FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev libwayland-dev file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build
+        run: cargo build --release --locked -p primeview
+      - name: Package .deb + AppImage
+        run: packaging/package.sh -f deb,appimage
+      - name: Inspect .deb
+        run: dpkg-deb --info target/packager/*.deb && dpkg-deb --contents target/packager/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primeview-linux
+          path: |
+            target/packager/*.deb
+            target/packager/*.AppImage
+          if-no-files-found: error
+
+  web:
+    name: Web (wasm, zipped dist)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-web
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build
+        run: trunk build --release
+        working-directory: app
+      - name: Zip dist/
+        run: |
+          mkdir -p target/packager
+          (cd dist && zip -r -9 "../target/packager/PrimeView_${{ needs.version.outputs.version }}_web.zip" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primeview-web
+          path: target/packager/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    needs: [version, macos, windows, linux, web]
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: PrimeView ${{ needs.version.outputs.version }}
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*

@@ -1,0 +1,20 @@
+PrimeView
+Copyright (c) 2026 PrimeView
+
+PrimeView is free software, dual-licensed under either of
+
+  * the MIT License (https://opensource.org/licenses/MIT), or
+  * the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+at your option (SPDX: MIT OR Apache-2.0).
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+PrimeView displays market data from third-party sources for information only.
+It is not investment advice.

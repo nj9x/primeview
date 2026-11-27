@@ -1,0 +1,10 @@
+[package]
+name = "primeview-chart"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+egui = "0.37.0"
+serde = { version = "1.0.229", features = ["derive"] }
+primeview-core = { version = "0.1.0", path = "../primeview-core" }
