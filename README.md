@@ -75,6 +75,21 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+### Local CI
+
+`scripts/ci.sh` runs the same checks as the GitHub workflow on your own machine:
+lints for native, Windows and web, then the tests, then release builds for all three.
+Use `--quick` to skip the release builds, or `--package` to also build the installers.
+
+Windows is cross-compiled from macOS or Linux with MinGW. One-time setup on macOS:
+
+```bash
+brew install mingw-w64 trunk
+rustup target add x86_64-pc-windows-gnu wasm32-unknown-unknown
+```
+
+Steps whose tools are missing are skipped and listed in the summary.
+
 To use stock/forex data, get a free Twelve Data key and paste it into **⚙ → Data providers**.
 The shared `demo` key only covers a few symbols (for example AAPL and EUR/USD).
 
